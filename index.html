@@ -1,0 +1,364 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Casamento Tainá e Alex</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ padding:14px;
+ background:#f4f2e9;
+ color:#4d573a;
+ font-family:Arial,sans-serif;
+ text-align:center
+}
+h2{margin:10px 0 5px}
+p{margin:8px}
+.tela{
+ position:relative;q ou
+ width:min(100%,390px);
+ aspect-ratio:9/16;
+ margin:12px auto;
+ background:#222;
+ overflow:hidden;
+ border-radius:14px
+}
+.tela video,.tela img{
+ position:absolute;
+ inset:0;
+ width:100%;
+ height:100%
+}
+#camera{object-fit:cover}
+#moldura{pointer-events:none}
+.espelho{transform:scaleX(-1)}
+button,a.botao{
+ background:#77845b;
+ color:white;
+ border:0;
+ border-radius:12px;
+ padding:13px 15px;
+ margin:5px;
+ font-size:15px;
+ display:inline-block;
+ text-decoration:none;
+ cursor:pointer
+}
+button:disabled{opacity:.45}
+#resultadoFoto,#resultadoVideo{
+ display:none;
+ width:min(100%,390px);
+ margin:15px auto;
+ border-radius:12px
+}
+#salvarFoto,#salvarVideo{display:none}
+#status{font-size:14px}
+</style>
+</head>
+<body>
+
+<h2>💍 Tainá e Alex 💍</h2>
+<p>13/11/2027</p>
+<p>Registre esse momento especial!</p>
+
+<div class="tela">
+ <video id="camera" autoplay muted playsinline></video>
+ <img id="moldura" src="moldura.png">
+</div>
+
+<button id="virar" onclick="virarCamera()">
+ 🔄 Virar câmera
+</button>
+
+<div>
+ <button id="fotoBtn" onclick="tirarFoto()">
+ 📸 Tirar foto
+ </button>
+ <button id="gravarBtn" onclick="iniciarVideo()">
+ 🎥 Gravar vídeo
+ </button>
+ <button id="pararBtn" onclick="pararVideo()" disabled>
+ ⏹ Parar
+ </button>
+</div>
+
+<p id="status">Abrindo câmera...</p>
+
+<img id="resultadoFoto">
+<video id="resultadoVideo" controls playsinline></video>
+
+<a id="salvarFoto" class="botao">
+ 💾 Salvar foto
+</a>
+<a id="salvarVideo" class="botao">
+ 💾 Salvar vídeo
+</a>
+
+<script>
+const camera=document.getElementById("camera");
+const moldura=document.getElementById("moldura");
+const statusEl=document.getElementById("status");
+const virarBtn=document.getElementById("virar");
+const fotoBtn=document.getElementById("fotoBtn");
+const gravarBtn=document.getElementById("gravarBtn");
+const pararBtn=document.getElementById("pararBtn");
+
+let lado="user";
+let cameraStream=null;
+let audioStream=null;
+let gravador=null;
+let pedacos=[];
+let gravando=false;
+let animacao=null;
+let canvas=null;
+let ctx=null;
+let urlAnterior=null;
+
+function aviso(t){
+ statusEl.textContent=t;
+}
+
+async function abrirCamera(){
+ try{
+  if(cameraStream){
+   cameraStream.getTracks().forEach(t=>t.stop());
+  }
+
+  cameraStream=await navigator.mediaDevices.getUserMedia({
+   video:{
+    facingMode:{ideal:lado},
+    width:{ideal:1280},
+    height:{ideal:720}
+   },
+   audio:false
+  });
+
+  camera.srcObject=cameraStream;
+  camera.classList.toggle("espelho",lado==="user");
+  await camera.play();
+  aviso("Câmera pronta! 💚");
+ }catch(e){
+  aviso("Permita o acesso à câmera no navegador.");
+ }
+}
+
+async function virarCamera(){
+ if(gravando)return;
+ lado=lado==="user"?"environment":"user";
+ await abrirCamera();
+}
+
+function preparar(){
+ canvas=document.createElement("canvas");
+ canvas.width=720;
+ canvas.height=1280;
+ ctx=canvas.getContext("2d");
+}
+
+function desenhar(){
+ if(!camera.videoWidth)return;
+
+ const w=canvas.width;
+ const h=canvas.height;
+ const vw=camera.videoWidth;
+ const vh=camera.videoHeight;
+ const escala=Math.max(w/vw,h/vh);
+ const sw=w/escala;
+ const sh=h/escala;
+
+ ctx.clearRect(0,0,w,h);
+ ctx.save();
+
+ if(lado==="user"){
+  ctx.translate(w,0);
+  ctx.scale(-1,1);
+ }
+
+ ctx.drawImage(
+  camera,
+  (vw-sw)/2,(vh-sh)/2,
+  sw,sh,
+  0,0,w,h
+ );
+ ctx.restore();
+
+ if(moldura.complete&&moldura.naturalWidth){
+  ctx.drawImage(moldura,0,0,w,h);
+ }
+}
+
+function tirarFoto(){
+ if(gravando||!camera.videoWidth)return;
+
+ preparar();
+ desenhar();
+
+ const imagem=canvas.toDataURL("image/png");
+ const resultado=document.getElementById("resultadoFoto");
+ const salvar=document.getElementById("salvarFoto");
+
+ resultado.src=imagem;
+ resultado.style.display="block";
+ salvar.href=imagem;
+ salvar.download="casamento-taina-alex.png";
+ salvar.style.display="inline-block";
+ aviso("Foto pronta! 💚");
+}
+
+function desenharContinuamente(){
+ desenhar();
+ animacao=requestAnimationFrame(desenharContinuamente);
+}
+
+function formatoSuportado(){
+ const formatos=[
+  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+  "video/mp4",
+  "video/webm;codecs=vp8,opus",
+  "video/webm"
+ ];
+ return formatos.find(
+  f=>MediaRecorder.isTypeSupported(f)
+ )||"";
+}
+
+async function iniciarVideo(){
+ if(gravando)return;
+
+ if(!camera.videoWidth){
+  aviso("Aguarde a câmera iniciar.");
+  return;
+ }
+
+ if(!window.MediaRecorder||
+    !HTMLCanvasElement.prototype.captureStream){
+  aviso("Este navegador não suporta esta gravação.");
+  return;
+ }
+
+ try{
+  audioStream=await navigator.mediaDevices.getUserMedia({
+   audio:{
+    echoCancellation:true,
+    noiseSuppression:true
+   },
+   video:false
+  });
+ }catch(e){
+  aviso("Autorize o microfone para gravar com áudio.");
+  return;
+ }
+
+ preparar();
+ desenharContinuamente();
+
+ let videoCanvas;
+ try{
+  videoCanvas=canvas.captureStream(30);
+ }catch(e){
+  cancelar();
+  aviso("Não foi possível capturar a imagem.");
+  return;
+ }
+
+ const combinado=new MediaStream([
+  ...videoCanvas.getVideoTracks(),
+  ...audioStream.getAudioTracks()
+ ]);
+
+ const formato=formatoSuportado();
+
+ try{
+  gravador=new MediaRecorder(
+   combinado,
+   formato?{mimeType:formato}:undefined
+  );
+ }catch(e){
+  cancelar();
+  combinado.getTracks().forEach(t=>t.stop());
+  aviso("Formato de gravação incompatível.");
+  return;
+ }
+
+ pedacos=[];
+
+ gravador.ondataavailable=e=>{
+  if(e.data.size>0)pedacos.push(e.data);
+ };
+
+ gravador.onstop=()=>{
+  cancelar();
+  combinado.getTracks().forEach(t=>t.stop());
+
+  const tipo=gravador.mimeType||"video/webm";
+  const arquivo=new Blob(pedacos,{type:tipo});
+
+  if(urlAnterior)URL.revokeObjectURL(urlAnterior);
+  urlAnterior=URL.createObjectURL(arquivo);
+
+  const resultado=document.getElementById("resultadoVideo");
+  const salvar=document.getElementById("salvarVideo");
+
+  resultado.src=urlAnterior;
+  resultado.style.display="block";
+
+  const extensao=tipo.includes("mp4")?"mp4":"webm";
+  salvar.href=urlAnterior;
+  salvar.download="casamento-taina-alex."+extensao;
+  salvar.style.display="inline-block";
+
+  gravando=false;
+  gravarBtn.disabled=false;
+  pararBtn.disabled=true;
+  virarBtn.disabled=false;
+  fotoBtn.disabled=false;
+
+  aviso("Vídeo pronto! Confira o som e salve. 💚");
+ };
+
+ gravador.onerror=()=>{
+  aviso("Erro durante a gravação.");
+  if(gravador.state!=="inactive")gravador.stop();
+ };
+
+ try{
+  gravador.start(250);
+  gravando=true;
+  gravarBtn.disabled=true;
+  pararBtn.disabled=false;
+  virarBtn.disabled=true;
+  fotoBtn.disabled=true;
+  aviso("🔴 Gravando com microfone...");
+ }catch(e){
+  cancelar();
+  combinado.getTracks().forEach(t=>t.stop());
+  aviso("Não foi possível iniciar o vídeo.");
+ }
+}
+
+function cancelar(){
+ if(animacao!==null){
+  cancelAnimationFrame(animacao);
+  animacao=null;
+ }
+ if(audioStream){
+  audioStream.getTracks().forEach(t=>t.stop());
+  audioStream=null;
+ }
+}
+
+function pararVideo(){
+ if(gravador&&gravador.state==="recording"){
+  pararBtn.disabled=true;
+  gravador.stop();
+  aviso("Preparando vídeo...");
+ }
+}
+
+abrirCamera();
+</script>
+</body>
+</html>
